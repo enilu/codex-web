@@ -1,5 +1,57 @@
+const ROUTE_SEGMENTS = new Set(["share", "thread"]);
+
+export function getBrowserBasePath(
+  pathname = window.location.pathname,
+): string {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return "";
+  }
+
+  const routeSegmentIndex = segments.findIndex((segment) =>
+    ROUTE_SEGMENTS.has(segment),
+  );
+  if (routeSegmentIndex === 0) {
+    return "";
+  }
+
+  if (routeSegmentIndex > 0) {
+    return `/${segments.slice(0, routeSegmentIndex).join("/")}`;
+  }
+
+  return `/${segments.join("/")}`;
+}
+
+function stripBrowserBasePath(pathname: string): string {
+  const basePath = getBrowserBasePath(pathname);
+  if (!basePath) {
+    return pathname;
+  }
+
+  if (pathname === basePath) {
+    return "/";
+  }
+
+  if (pathname.startsWith(`${basePath}/`)) {
+    return pathname.slice(basePath.length) || "/";
+  }
+
+  return pathname;
+}
+
+function withBrowserBasePath(pathname: string): string {
+  const basePath = getBrowserBasePath();
+  if (!basePath) {
+    return pathname;
+  }
+
+  return pathname === "/" ? basePath : `${basePath}${pathname}`;
+}
+
 export function mapBrowserPathToInitialRoute(pathname: string, search: string) {
-  if (pathname === "/share/receive" && search) {
+  const routePathname = stripBrowserBasePath(pathname);
+
+  if (routePathname === "/share/receive" && search) {
     const params = new URLSearchParams(search);
 
     const prompt = ["title", "text", "url"]
@@ -13,12 +65,12 @@ export function mapBrowserPathToInitialRoute(pathname: string, search: string) {
       memoryPath: prompt
         ? `/?${new URLSearchParams({ prompt }).toString()}`
         : "/",
-      browserPath: "/",
+      browserPath: withBrowserBasePath("/"),
     };
   }
 
   return {
-    memoryPath: mapBrowserPathToRoute(pathname),
+    memoryPath: mapBrowserPathToRoute(routePathname),
   };
 }
 
@@ -37,7 +89,7 @@ function mapBrowserPathToRoute(pathname: string): string {
 
 export function mapMemoryPathToBrowserPath(pathname: string) {
   if (pathname === "/") {
-    return { path: "/", titleChange: "Codex" };
+    return { path: withBrowserBasePath("/"), titleChange: "Codex" };
   }
 
   const match = pathname.match(/^\/local\/([^/?#]+)$/);
@@ -45,7 +97,9 @@ export function mapMemoryPathToBrowserPath(pathname: string) {
     return null;
   }
 
-  return { path: `/thread/${encodeURIComponent(match[1])}` };
+  return {
+    path: withBrowserBasePath(`/thread/${encodeURIComponent(match[1])}`),
+  };
 }
 
 export function dispatchNavigateToRoute(path: string): void {
@@ -60,5 +114,7 @@ export function dispatchNavigateToRoute(path: string): void {
 }
 
 window.addEventListener("popstate", () => {
-  dispatchNavigateToRoute(mapBrowserPathToRoute(window.location.pathname));
+  dispatchNavigateToRoute(
+    mapBrowserPathToRoute(stripBrowserBasePath(window.location.pathname)),
+  );
 });

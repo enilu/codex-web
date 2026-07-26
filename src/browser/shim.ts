@@ -1,4 +1,5 @@
 import {
+  getBrowserBasePath,
   mapBrowserPathToInitialRoute,
   mapMemoryPathToBrowserPath,
 } from "./routes";
@@ -268,8 +269,9 @@ function ensureSocket(): void {
     return;
   }
 
+  const backendPath = `${getBrowserBasePath()}/__backend/ipc`;
   socket = new WebSocket(
-    `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/__backend/ipc`,
+    `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${backendPath}`,
   );
   socket.addEventListener("open", () => {
     flushOutboundQueue();

@@ -1,3 +1,4 @@
+import { getBrowserBasePath } from "./routes";
 import { emitRendererEvent, isRecord } from "./shim";
 
 type CodexFetchMessage = {
@@ -88,7 +89,10 @@ async function uploadFiles(files: File[]) {
     return [];
   }
 
-  const uploadUrl = new URL("/__backend/upload", window.location.href);
+  const uploadUrl = new URL(
+    `${getBrowserBasePath()}/__backend/upload`,
+    window.location.href,
+  );
   const formData = new FormData();
 
   for (const file of files) {

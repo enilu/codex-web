@@ -13,6 +13,7 @@ import path from "node:path";
 import { parseArgs as parseCliArgs } from "node:util";
 import { WebSocket, WebSocketServer } from "ws";
 import Fastify from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { installModuleAliasHook } from "./module";
@@ -41,6 +42,10 @@ function cacheControlForWebviewFile(filePath: string): string {
     hasContentHash
     ? "public, max-age=31536000, immutable"
     : "public, max-age=0";
+}
+
+function isBackendPath(pathname: string, suffix: string): boolean {
+  return pathname === suffix || pathname.endsWith(suffix);
 }
 
 type RendererToMainMessage =
@@ -411,7 +416,10 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     path.join(os.tmpdir(), "codex-web-uploads-"),
   );
 
-  app.post("/__backend/upload", async (request, reply) => {
+  const uploadHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
     if (!request.isMultipart()) {
       return reply.code(400).send({ error: "expected multipart upload body" });
     }
@@ -435,7 +443,10 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     );
 
     return reply.send({ files });
-  });
+  };
+
+  app.post("/__backend/upload", uploadHandler);
+  app.post("/codex/__backend/upload", uploadHandler);
 
   await app.register(fastifyStatic, {
     root: "/",
@@ -447,6 +458,16 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     root: path.resolve(__dirname, "../../scratch/asar/webview"),
     prefix: "/",
     cacheControl: false,
+    setHeaders(response, filePath) {
+      response.setHeader("Cache-Control", cacheControlForWebviewFile(filePath));
+    },
+  });
+
+  await app.register(fastifyStatic, {
+    root: path.resolve(__dirname, "../../scratch/asar/webview"),
+    prefix: "/codex/",
+    cacheControl: false,
+    decorateReply: false,
     setHeaders(response, filePath) {
       response.setHeader("Cache-Control", cacheControlForWebviewFile(filePath));
     },
@@ -471,7 +492,7 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     const requestUrl = request.url ?? "/";
     const host = request.headers.host ?? "localhost";
     const url = new URL(requestUrl, `http://${host}`);
-    if (url.pathname !== "/__backend/ipc") {
+    if (!isBackendPath(url.pathname, "/__backend/ipc")) {
       socket.destroy();
       return;
     }
