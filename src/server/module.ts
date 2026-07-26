@@ -23,6 +23,13 @@ export function installModuleAliasHook(): void {
       ), parent, isMain);
     }
 
+    if (request === "better-sqlite3") {
+      return originalLoad.call(this, path.resolve(
+        path.resolve(__dirname, "../.."),
+        "node_modules/better-sqlite3",
+      ), parent, isMain);
+    }
+
     return originalLoad.call(this, request, parent, isMain);
   };
 }

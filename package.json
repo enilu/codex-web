@@ -19,7 +19,9 @@
     "build:server": "cd src/server && tsc",
     "prepare:asar": "./scripts/prepare_asar",
     "preserver": "npm run build:server && npm run build:browser",
-    "server": "CODEX_CLI_PATH=$(which codex) node src/server/main.js"
+    "server": "CODEX_CLI_PATH=$(which codex) node src/server/main.js",
+    "server:win": "set CODEX_CLI_PATH=G:\\Program\\develop\\nodejs\\node.exe&& node src/server/main.js --host 127.0.0.1 --port 8214",
+    "server:lan:win": "set CODEX_CLI_PATH=G:\\Program\\develop\\nodejs\\node.exe&& node src/server/main.js --host 0.0.0.0 --port 8214"
   },
   "repository": "git@github.com:0xcaff/codex-web.git",
   "author": "martin <martincharles07@gmail.com>",
