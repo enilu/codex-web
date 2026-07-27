@@ -4,3 +4,4 @@ sentry
 src/server/**/*.js
 src/server/**/*.d.ts
 src/server/**/*.map
+codex-web.local.json
