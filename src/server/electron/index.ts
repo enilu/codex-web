@@ -781,6 +781,13 @@ function createStubbedExternalResponse(url: string): Response | null {
     return null;
   }
 
+  const isChatGptBackendRequest =
+    parsed.hostname === "chatgpt.com" &&
+    parsed.pathname.startsWith("/backend-api/");
+  const backendPath = isChatGptBackendRequest
+    ? parsed.pathname.slice("/backend-api".length)
+    : parsed.pathname;
+
   const isClientEventsRequest =
     (parsed.hostname === "chatgpt.com" ||
       parsed.hostname === "chat.openai.com") &&
@@ -810,6 +817,34 @@ function createStubbedExternalResponse(url: string): Response | null {
         status: 200,
       },
     );
+  }
+
+  const isCloudTasksListRequest =
+    isChatGptBackendRequest && backendPath === "/wham/tasks/list";
+  if (isCloudTasksListRequest) {
+    return new Response(JSON.stringify({ items: [] }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    });
+  }
+
+  const isCloudUsageRequest =
+    isChatGptBackendRequest && backendPath === "/wham/usage";
+  if (isCloudUsageRequest) {
+    return new Response(JSON.stringify({ error: "not_available_in_codex_web" }), {
+      headers: { "content-type": "application/json" },
+      status: 404,
+    });
+  }
+
+  const isCloudUserSettingsRequest =
+    isChatGptBackendRequest &&
+    (backendPath === "/settings/user" || backendPath === "/wham/settings/user");
+  if (isCloudUserSettingsRequest) {
+    return new Response(JSON.stringify({ settings: {} }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    });
   }
 
   return null;
