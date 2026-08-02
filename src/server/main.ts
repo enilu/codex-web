@@ -14,6 +14,7 @@ import { parseArgs as parseCliArgs } from "node:util";
 import { WebSocket, WebSocketServer } from "ws";
 import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import fastifyCompress from "@fastify/compress";
 import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { installModuleAliasHook } from "./module";
@@ -30,7 +31,10 @@ function isInvalidWindowsKillError(error: unknown): boolean {
 
 process.on("uncaughtException", (error) => {
   if (isInvalidWindowsKillError(error)) {
-    console.error("[codex-web] ignored invalid Windows child process kill", error);
+    console.error(
+      "[codex-web] ignored invalid Windows child process kill",
+      error,
+    );
     return;
   }
 
@@ -60,6 +64,27 @@ function cacheControlForWebviewFile(filePath: string): string {
     hasContentHash
     ? "public, max-age=31536000, immutable"
     : "public, max-age=0";
+}
+
+function shouldCompressResponse(
+  contentTypeHeader: number | string | string[] | undefined,
+): boolean {
+  const contentTypes = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader
+    : [contentTypeHeader];
+  const contentType = contentTypes
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+
+  return [
+    "application/javascript",
+    "application/json",
+    "image/svg+xml",
+    "text/css",
+    "text/html",
+    "text/javascript",
+  ].some((compressibleType) => contentType.includes(compressibleType));
 }
 
 function isBackendPath(pathname: string, suffix: string): boolean {
@@ -418,6 +443,74 @@ function ensureElectronLikeProcessContext(): void {
   processWithElectronFields.type ??= "browser";
 }
 
+function shouldDisableBundledPluginReconcile(): boolean {
+  return process.env.CODEX_WEB_DISABLE_BUNDLED_PLUGIN_RECONCILE !== "0";
+}
+
+function patchMainBundleForCodexWeb(source: string): string {
+  if (!shouldDisableBundledPluginReconcile()) {
+    return source;
+  }
+
+  const bundledPluginReconcileGuard =
+    "if(e.buildFlavor===i.a.Dev&&t[ol]?.trim()!==`1`){";
+  const codexWebBundledPluginReconcileGuard =
+    "if((process.env.CODEX_WEB_DISABLE_BUNDLED_PLUGIN_RECONCILE!==`0`)||e.buildFlavor===i.a.Dev&&t[ol]?.trim()!==`1`){";
+
+  if (!source.includes(bundledPluginReconcileGuard)) {
+    console.warn(
+      "[codex-web] bundled plugin reconcile guard not found; startup will use the unpatched Electron bundle",
+    );
+    return source;
+  }
+
+  return source.replace(
+    bundledPluginReconcileGuard,
+    codexWebBundledPluginReconcileGuard,
+  );
+}
+
+function requireMainBundle(bundlePath: string): {
+  runMainAppStartup: () => void;
+} {
+  const resolvedBundlePath = require.resolve(bundlePath);
+
+  if (!shouldDisableBundledPluginReconcile()) {
+    return require(resolvedBundlePath) as { runMainAppStartup: () => void };
+  }
+
+  type NodeJsModuleWithCompile = NodeJS.Module & {
+    _compile(source: string, filename: string): void;
+  };
+  type NodeModuleLoader = {
+    _extensions: Record<
+      string,
+      ((module: NodeJsModuleWithCompile, filename: string) => void) | undefined
+    >;
+  };
+  const Module = require("node:module") as NodeModuleLoader;
+  const originalJsLoader = Module._extensions[".js"];
+  if (!originalJsLoader) {
+    throw new Error("Node.js .js module loader is unavailable");
+  }
+
+  Module._extensions[".js"] = (module, filename) => {
+    if (path.resolve(filename) !== path.resolve(resolvedBundlePath)) {
+      originalJsLoader(module, filename);
+      return;
+    }
+
+    const source = require("node:fs").readFileSync(filename, "utf8") as string;
+    module._compile(patchMainBundleForCodexWeb(source), filename);
+  };
+
+  try {
+    return require(resolvedBundlePath) as { runMainAppStartup: () => void };
+  } finally {
+    Module._extensions[".js"] = originalJsLoader;
+  }
+}
+
 async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
   const bridgeState = getIpcMainBridgeState();
   const app = Fastify({ logger: false });
@@ -428,6 +521,13 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     limits: {
       fileSize: Infinity,
     },
+  });
+
+  await app.register(fastifyCompress, {
+    encodings: ["br", "gzip"],
+    global: true,
+    threshold: 1024,
+    customTypes: shouldCompressResponse,
   });
 
   const uploadRoot = await fs.mkdtemp(
@@ -712,7 +812,7 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     throw new Error("multiple main bundles found");
   }
 
-  const module = require(matches[0]!);
+  const module = requireMainBundle(matches[0]!);
   module.runMainAppStartup();
 }
 
