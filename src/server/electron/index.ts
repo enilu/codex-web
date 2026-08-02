@@ -758,11 +758,100 @@ const crashReporter = {
   },
 };
 
+function describeFetchInput(input: string | URL | Request): {
+  method: string;
+  url: string;
+} {
+  if (typeof input === "string") {
+    return { method: "GET", url: input };
+  }
+
+  if (input instanceof URL) {
+    return { method: "GET", url: input.href };
+  }
+
+  return { method: input.method || "GET", url: input.url };
+}
+
+function createStubbedExternalResponse(url: string): Response | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  const isClientEventsRequest =
+    (parsed.hostname === "chatgpt.com" ||
+      parsed.hostname === "chat.openai.com") &&
+    parsed.pathname.startsWith("/ces/");
+  if (isClientEventsRequest) {
+    return new Response("{}", {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    });
+  }
+
+  const isStatsigInitializeRequest =
+    parsed.hostname === "ab.chatgpt.com" &&
+    parsed.pathname === "/v1/initialize";
+  if (isStatsigInitializeRequest) {
+    return new Response(
+      JSON.stringify({
+        dynamic_configs: {},
+        evaluated_keys: {},
+        feature_gates: {},
+        has_updates: true,
+        layer_configs: {},
+        time: Date.now(),
+      }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      },
+    );
+  }
+
+  return null;
+}
+
 const net = {
-  async fetch(input: string | URL, init?: RequestInit): Promise<Response> {
-    // log("net.fetch", [input, init]);
+  async fetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+    const startedAt = Date.now();
+    const request = describeFetchInput(input);
+    const method = init?.method ?? request.method;
+    const stubbedResponse = createStubbedExternalResponse(request.url);
+    if (stubbedResponse) {
+      console.log("[electron-main-stub] net.fetch.stubbed", {
+        durationMs: Date.now() - startedAt,
+        method,
+        status: stubbedResponse.status,
+        url: request.url,
+      });
+      return stubbedResponse;
+    }
+
     if (typeof globalThis.fetch === "function") {
-      return globalThis.fetch(input as URL | RequestInfo, init);
+      try {
+        return await globalThis.fetch(input as URL | RequestInfo, init);
+      } catch (error) {
+        console.error("[electron-main-stub] net.fetch.failed", {
+          cause:
+            error instanceof Error && error.cause instanceof Error
+              ? {
+                  message: error.cause.message,
+                  name: error.cause.name,
+                  stack: error.cause.stack,
+                }
+              : undefined,
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error),
+          method,
+          stack: error instanceof Error ? error.stack : undefined,
+          url: request.url,
+        });
+        throw error;
+      }
     }
     return new Response("", { status: 204 });
   },

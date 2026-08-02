@@ -19,6 +19,24 @@ import fastifyStatic from "@fastify/static";
 import { installModuleAliasHook } from "./module";
 import { glob } from "glob";
 
+function isInvalidWindowsKillError(error: unknown): boolean {
+  if (process.platform !== "win32" || !(error instanceof Error)) {
+    return false;
+  }
+
+  const nodeError = error as NodeJS.ErrnoException;
+  return nodeError.code === "EINVAL" && nodeError.syscall === "kill";
+}
+
+process.on("uncaughtException", (error) => {
+  if (isInvalidWindowsKillError(error)) {
+    console.error("[codex-web] ignored invalid Windows child process kill", error);
+    return;
+  }
+
+  throw error;
+});
+
 type ServerOptions = {
   host: string;
   port: number;
