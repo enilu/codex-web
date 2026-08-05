@@ -566,6 +566,20 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
   app.post("/__backend/upload", uploadHandler);
   app.post("/codex/__backend/upload", uploadHandler);
 
+  const browserConfigHandler = async (
+    _request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    return reply
+      .header("Cache-Control", "no-store")
+      .send({
+        showDesktopMenu: process.env.CODEX_WEB_SHOW_DESKTOP_MENU === "1",
+      });
+  };
+
+  app.get("/__backend/config", browserConfigHandler);
+  app.get("/codex/__backend/config", browserConfigHandler);
+
   await app.register(fastifyStatic, {
     root: "/",
     prefix: "/@fs/",

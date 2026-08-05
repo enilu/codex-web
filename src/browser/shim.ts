@@ -46,6 +46,54 @@ function installCryptoRandomUuidFallback(): void {
 
 installCryptoRandomUuidFallback();
 
+const BROWSER_SHELL_STYLE_ID = "codex-web-browser-shell-style";
+
+function startBrowserShellFeature(): void {
+  try {
+    if (!document.getElementById(BROWSER_SHELL_STYLE_ID)) {
+      const style = document.createElement("style");
+      style.id = BROWSER_SHELL_STYLE_ID;
+      style.textContent = `
+:root:not([data-codex-web-desktop-menu="visible"])
+  [role="menubar"][aria-label="Application menu"] {
+  display: none !important;
+}
+`;
+      document.head.append(style);
+    }
+
+    void fetch("/__backend/config", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`config request failed with ${response.status}`);
+        }
+
+        return (await response.json()) as { showDesktopMenu?: unknown };
+      })
+      .then((config) => {
+        if (config.showDesktopMenu === true) {
+          document.documentElement.dataset.codexWebDesktopMenu = "visible";
+          return;
+        }
+
+        delete document.documentElement.dataset.codexWebDesktopMenu;
+      })
+      .catch((error) => {
+        console.warn(
+          "[codex-web-shell] browser configuration did not load; keeping the desktop menu hidden",
+          error,
+        );
+      });
+  } catch (error) {
+    console.warn(
+      "[codex-web-shell] browser shell customization failed; continuing with the native header",
+      error,
+    );
+  }
+}
+
+startBrowserShellFeature();
+
 type IpcListener = (event: unknown, ...args: unknown[]) => void;
 
 type RendererToMainMessage =

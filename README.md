@@ -124,6 +124,16 @@ to the native appearance without blocking the main interface. custom images are
 limited to PNG, JPEG, or WebP files up to 16 MB, 16384 pixels per dimension, and
 50 megapixels.
 
+### browser header
+
+the Electron desktop application menu (`File`, `Edit`, `View`, and `Help`) is
+hidden by default in codex-web. browser-native navigation and sidebar controls
+remain available in the header. this avoids exposing desktop-only menu actions
+that do not have reliable browser equivalents.
+
+set `CODEX_WEB_SHOW_DESKTOP_MENU=1` before starting the server to restore the
+desktop menu for debugging or compatibility testing.
+
 ## roadmap
 
 some parts of the desktop experience are not wired up yet:

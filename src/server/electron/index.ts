@@ -965,18 +965,104 @@ const nativeTheme = {
   shouldUseInvertedColorScheme: false,
   themeSource: "system",
 };
+
+type StubNativeImage = {
+  addRepresentation: (...args: unknown[]) => void;
+  crop: (rect: { height?: number; width?: number }) => StubNativeImage;
+  getScaleFactors: () => number[];
+  getSize: () => { height: number; width: number };
+  isEmpty: () => boolean;
+  resize: (options?: { height?: number; width?: number }) => StubNativeImage;
+  setTemplateImage: (...args: unknown[]) => void;
+  toBitmap: (...args: unknown[]) => Buffer;
+  toDataURL: () => string;
+};
+
+const TRANSPARENT_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+function createNativeImageStub({
+  dataUrl = TRANSPARENT_PNG_DATA_URL,
+  empty,
+  height = empty ? 0 : 1,
+  width = empty ? 0 : 1,
+}: {
+  dataUrl?: string;
+  empty: boolean;
+  height?: number;
+  width?: number;
+}): StubNativeImage {
+  return {
+    addRepresentation(...args: unknown[]): void {
+      log("nativeImage.addRepresentation", args);
+    },
+    crop(rect): StubNativeImage {
+      log("nativeImage.crop", [rect]);
+      return createNativeImageStub({
+        dataUrl,
+        empty,
+        height: rect.height ?? height,
+        width: rect.width ?? width,
+      });
+    },
+    getScaleFactors(): number[] {
+      return empty ? [] : [1];
+    },
+    getSize(): { height: number; width: number } {
+      return { height, width };
+    },
+    isEmpty(): boolean {
+      return empty;
+    },
+    resize(options = {}): StubNativeImage {
+      log("nativeImage.resize", [options]);
+      return createNativeImageStub({
+        dataUrl,
+        empty,
+        height: options.height ?? height,
+        width: options.width ?? width,
+      });
+    },
+    setTemplateImage(...args: unknown[]): void {
+      log("nativeImage.setTemplateImage", args);
+    },
+    toBitmap(...args: unknown[]): Buffer {
+      log("nativeImage.toBitmap", args);
+      return Buffer.alloc(0);
+    },
+    toDataURL(): string {
+      return empty ? "" : dataUrl;
+    },
+  };
+}
+
 const nativeImage = {
-  createEmpty(): { isEmpty: () => boolean } {
+  createEmpty(): StubNativeImage {
     log("nativeImage.createEmpty", []);
-    return {
-      isEmpty: () => true,
-    };
+    return createNativeImageStub({ empty: true });
   },
-  createFromPath(imagePath: string): { isEmpty: () => boolean } {
+  createFromBitmap(bitmap: Buffer): StubNativeImage {
+    log("nativeImage.createFromBitmap", [bitmap.length]);
+    return createNativeImageStub({ empty: bitmap.length === 0 });
+  },
+  createFromDataURL(dataUrl: string): StubNativeImage {
+    log("nativeImage.createFromDataURL", [dataUrl.slice(0, 64)]);
+    return createNativeImageStub({
+      dataUrl: dataUrl || TRANSPARENT_PNG_DATA_URL,
+      empty: !dataUrl,
+    });
+  },
+  createFromNamedImage(imageName: string): StubNativeImage {
+    log("nativeImage.createFromNamedImage", [imageName]);
+    return createNativeImageStub({ empty: !imageName });
+  },
+  createFromPath(imagePath: string): StubNativeImage {
     log("nativeImage.createFromPath", [imagePath]);
-    return {
-      isEmpty: () => !imagePath,
-    };
+    return createNativeImageStub({ empty: !imagePath });
+  },
+  async createThumbnailFromPath(imagePath: string): Promise<StubNativeImage> {
+    log("nativeImage.createThumbnailFromPath", [imagePath]);
+    return createNativeImageStub({ empty: !imagePath });
   },
 };
 const powerMonitor = createEmitterStub("powerMonitor");
