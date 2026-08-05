@@ -6,7 +6,12 @@ declare global {
   };
 }
 
-import { randomUUID } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -45,6 +50,9 @@ type ServerOptions = {
   host: string;
   port: number;
 };
+
+const AUTH_COOKIE_NAME = "codex_web_session";
+const AUTH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 function cacheControlForWebviewFile(filePath: string): string {
   const filename = path.basename(filePath);
@@ -89,6 +97,78 @@ function shouldCompressResponse(
 
 function isBackendPath(pathname: string, suffix: string): boolean {
   return pathname === suffix || pathname.endsWith(suffix);
+}
+
+function parseCookies(cookieHeader: string | undefined): Map<string, string> {
+  const cookies = new Map<string, string>();
+  if (!cookieHeader) {
+    return cookies;
+  }
+
+  for (const part of cookieHeader.split(";")) {
+    const separatorIndex = part.indexOf("=");
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const name = part.slice(0, separatorIndex).trim();
+    const value = part.slice(separatorIndex + 1).trim();
+    if (!name) {
+      continue;
+    }
+
+    try {
+      cookies.set(name, decodeURIComponent(value));
+    } catch {
+      cookies.set(name, value);
+    }
+  }
+
+  return cookies;
+}
+
+function serializeCookie({
+  name,
+  value,
+  maxAgeSeconds,
+  secure,
+}: {
+  name: string;
+  value: string;
+  maxAgeSeconds: number;
+  secure: boolean;
+}): string {
+  return [
+    `${name}=${encodeURIComponent(value)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`,
+    secure ? "Secure" : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join("; ");
+}
+
+function sha256(value: string): Buffer {
+  return createHash("sha256").update(value).digest();
+}
+
+function constantTimeEqual(left: Buffer, right: Buffer): boolean {
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function isSecureRequest(request: FastifyRequest): boolean {
+  const forwardedProto = request.headers["x-forwarded-proto"];
+  const forwardedProtoValue = Array.isArray(forwardedProto)
+    ? forwardedProto[0]
+    : forwardedProto;
+
+  return forwardedProtoValue === "https" || request.protocol === "https";
+}
+
+function getLoginPath(pathname: string): string {
+  return pathname.startsWith("/codex/") ? "/codex/login.html" : "/login.html";
 }
 
 type RendererToMainMessage =
@@ -295,23 +375,25 @@ async function getWindowsDriveEntries(): Promise<WorkspaceDirectoryEntries> {
   const driveLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
   const entries = (
     await Promise.all(
-      driveLetters.map(async (letter): Promise<WorkspaceDirectoryEntry | null> => {
-        const drivePath = `${letter}:\\`;
-        try {
-          const stat = await fs.stat(drivePath);
-          if (!stat.isDirectory()) {
+      driveLetters.map(
+        async (letter): Promise<WorkspaceDirectoryEntry | null> => {
+          const drivePath = `${letter}:\\`;
+          try {
+            const stat = await fs.stat(drivePath);
+            if (!stat.isDirectory()) {
+              return null;
+            }
+          } catch {
             return null;
           }
-        } catch {
-          return null;
-        }
 
-        return {
-          name: drivePath,
-          path: drivePath,
-          type: "directory",
-        };
-      }),
+          return {
+            name: drivePath,
+            path: drivePath,
+            type: "directory",
+          };
+        },
+      ),
     )
   ).filter((entry): entry is WorkspaceDirectoryEntry => entry !== null);
 
@@ -559,6 +641,89 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
   const app = Fastify({ logger: false });
   const websocketServer = new WebSocketServer({ noServer: true });
   const sockets = new Set<WebSocket>();
+  const sessions = new Set<string>();
+  const authPassword = process.env.CODEX_WEB_PASSWORD;
+  const authPasswordSha256 = process.env.CODEX_WEB_PASSWORD_SHA256?.trim();
+  const authEnabled =
+    (authPassword !== undefined && authPassword.length > 0) ||
+    (authPasswordSha256 !== undefined && authPasswordSha256.length > 0);
+
+  const hasValidSession = (cookieHeader: string | undefined): boolean => {
+    const token = parseCookies(cookieHeader).get(AUTH_COOKIE_NAME);
+    return token !== undefined && sessions.has(token);
+  };
+
+  const verifyPassword = (password: string): boolean => {
+    const incomingHash = sha256(password);
+
+    if (authPasswordSha256) {
+      const expectedHash = Buffer.from(authPasswordSha256, "hex");
+      return constantTimeEqual(incomingHash, expectedHash);
+    }
+
+    return (
+      authPassword !== undefined &&
+      constantTimeEqual(incomingHash, sha256(authPassword))
+    );
+  };
+
+  const renderLoginPage = async (error = ""): Promise<string> => {
+    const html = await fs.readFile(
+      path.resolve(__dirname, "../../assets/login.html"),
+      "utf8",
+    );
+
+    return html.replace("{{CODEX_LOGIN_ERROR}}", error);
+  };
+
+  const isPublicAuthPath = (pathname: string): boolean =>
+    [
+      "/login.html",
+      "/codex/login.html",
+      "/codex-login",
+      "/codex/codex-login",
+      "/codex-logout",
+      "/codex/codex-logout",
+    ].includes(pathname);
+
+  const isBackendRequest = (pathname: string): boolean =>
+    isBackendPath(pathname, "/__backend/ipc") ||
+    isBackendPath(pathname, "/__backend/upload") ||
+    isBackendPath(pathname, "/__backend/config");
+
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_request, body, done) => {
+      const entries = new URLSearchParams(String(body));
+      done(null, Object.fromEntries(entries));
+    },
+  );
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (!authEnabled) {
+      return;
+    }
+
+    const url = new URL(request.url, "http://codex-web.local");
+    if (isPublicAuthPath(url.pathname)) {
+      return;
+    }
+
+    if (hasValidSession(request.headers.cookie)) {
+      return;
+    }
+
+    if (isBackendRequest(url.pathname)) {
+      return reply.code(401).send({ error: "authentication_required" });
+    }
+
+    if (request.method === "GET" || request.method === "HEAD") {
+      return reply.redirect(getLoginPath(url.pathname), 303);
+    }
+
+    return reply.code(401).send({ error: "authentication_required" });
+  });
 
   await app.register(fastifyMultipart, {
     limits: {
@@ -613,11 +778,9 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     _request: FastifyRequest,
     reply: FastifyReply,
   ) => {
-    return reply
-      .header("Cache-Control", "no-store")
-      .send({
-        showDesktopMenu: process.env.CODEX_WEB_SHOW_DESKTOP_MENU === "1",
-      });
+    return reply.header("Cache-Control", "no-store").send({
+      showDesktopMenu: process.env.CODEX_WEB_SHOW_DESKTOP_MENU === "1",
+    });
   };
 
   app.get("/__backend/config", browserConfigHandler);
@@ -652,17 +815,79 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     return reply.sendFile("index.html");
   });
 
-  const loginPageHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
-    const html = await fs.readFile(
-      path.resolve(__dirname, "../../assets/login.html"),
-      "utf8",
-    );
+  const loginPageHandler = async (
+    _request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const html = await renderLoginPage();
 
     return reply.type("text/html; charset=utf-8").send(html);
   };
 
   app.get("/login.html", loginPageHandler);
   app.get("/codex/login.html", loginPageHandler);
+
+  const loginSubmitHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const body = request.body as { password?: unknown } | undefined;
+    const password = typeof body?.password === "string" ? body.password : "";
+    const url = new URL(request.url, "http://codex-web.local");
+    const redirectPath = url.pathname.startsWith("/codex/") ? "/codex/" : "/";
+
+    if (!authEnabled || verifyPassword(password)) {
+      if (authEnabled) {
+        const token = randomBytes(32).toString("base64url");
+        sessions.add(token);
+        reply.header(
+          "Set-Cookie",
+          serializeCookie({
+            name: AUTH_COOKIE_NAME,
+            value: token,
+            maxAgeSeconds: AUTH_SESSION_MAX_AGE_SECONDS,
+            secure: isSecureRequest(request),
+          }),
+        );
+      }
+
+      return reply.redirect(redirectPath, 303);
+    }
+
+    return reply
+      .code(401)
+      .type("text/html; charset=utf-8")
+      .send(await renderLoginPage("访问密码不正确。"));
+  };
+
+  app.post("/codex-login", loginSubmitHandler);
+  app.post("/codex/codex-login", loginSubmitHandler);
+
+  const logoutHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const token = parseCookies(request.headers.cookie).get(AUTH_COOKIE_NAME);
+    if (token) {
+      sessions.delete(token);
+    }
+
+    reply.header(
+      "Set-Cookie",
+      serializeCookie({
+        name: AUTH_COOKIE_NAME,
+        value: "",
+        maxAgeSeconds: 0,
+        secure: isSecureRequest(request),
+      }),
+    );
+
+    const url = new URL(request.url, "http://codex-web.local");
+    return reply.redirect(getLoginPath(url.pathname), 303);
+  };
+
+  app.get("/codex-logout", logoutHandler);
+  app.get("/codex/codex-logout", logoutHandler);
 
   app.setNotFoundHandler((request, reply) => {
     if (request.url.startsWith("/@fs/")) {
@@ -680,6 +905,12 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     const host = request.headers.host ?? "localhost";
     const url = new URL(requestUrl, `http://${host}`);
     if (!isBackendPath(url.pathname, "/__backend/ipc")) {
+      socket.destroy();
+      return;
+    }
+
+    if (authEnabled && !hasValidSession(request.headers.cookie)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
     }
@@ -853,6 +1084,13 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
 
   await app.listen({ host: options.host, port: options.port });
   console.log(`IPC bridge listening at ws://${options.host}:${options.port}`);
+  if (authEnabled) {
+    console.log("[codex-web] password authentication enabled");
+  } else if (options.host === "0.0.0.0") {
+    console.warn(
+      "[codex-web] authentication disabled; set CODEX_WEB_PASSWORD before exposing codex-web on a network",
+    );
+  }
 
   ensureElectronLikeProcessContext();
   installModuleAliasHook();

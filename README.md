@@ -40,6 +40,28 @@ nix run github:0xcaff/codex-web
 
 then open <http://127.0.0.1:8214> in a browser.
 
+### password authentication
+
+by default, `codex-web` keeps the upstream behavior and does not require a
+password. set `CODEX_WEB_PASSWORD` to enable the built-in login page and protect
+the browser ui, upload endpoint, config endpoint, and websocket bridge:
+
+```bash
+CODEX_WEB_PASSWORD='choose-a-long-password' codex-web --host 0.0.0.0
+```
+
+on Windows:
+
+```powershell
+$env:CODEX_WEB_PASSWORD = "choose-a-long-password"
+npm run server:lan:win
+```
+
+after signing in, codex-web stores an in-memory session and sends it as an
+`HttpOnly` cookie. sessions are cleared when the server restarts. if you do not
+want the plain password in the environment, set `CODEX_WEB_PASSWORD_SHA256` to
+the lowercase SHA-256 hex digest instead.
+
 ### sign in
 
 ensure the codex cli on the host machine is signed in before starting the
@@ -85,9 +107,10 @@ run `codex-web` only on trusted networks. treat anyone who can reach the
 `codex-web` server as someone who can operate codex on the host machine as the
 same user running the server.
 
-if you need authn or authz, implement it outside of `codex-web`: proxy it through
-wireguard, tailscale, or an ssh tunnel and put an authentication gateway or
-reverse proxy in front.
+set `CODEX_WEB_PASSWORD` before listening on a LAN or public interface. for
+defense in depth, proxy it through wireguard, tailscale, an ssh tunnel,
+cloudflare access, or another authentication gateway when exposing it beyond a
+trusted network.
 
 someone with access to the web ui may be able to:
 
