@@ -291,6 +291,37 @@ function compareWorkspaceDirectoryEntries(
   );
 }
 
+async function getWindowsDriveEntries(): Promise<WorkspaceDirectoryEntries> {
+  const driveLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+  const entries = (
+    await Promise.all(
+      driveLetters.map(async (letter): Promise<WorkspaceDirectoryEntry | null> => {
+        const drivePath = `${letter}:\\`;
+        try {
+          const stat = await fs.stat(drivePath);
+          if (!stat.isDirectory()) {
+            return null;
+          }
+        } catch {
+          return null;
+        }
+
+        return {
+          name: drivePath,
+          path: drivePath,
+          type: "directory",
+        };
+      }),
+    )
+  ).filter((entry): entry is WorkspaceDirectoryEntry => entry !== null);
+
+  return {
+    directoryPath: "",
+    parentPath: null,
+    entries,
+  };
+}
+
 type IpcMainBridgeState = {
   broadcastToRenderer?: (message: MainToRendererMessage) => void;
   handleRendererInvoke?: (channel: string, args: unknown[]) => Promise<unknown>;
@@ -382,7 +413,15 @@ async function getWorkspaceDirectoryEntries({
   directoryPath: string | null;
   directoriesOnly: boolean;
 }): Promise<WorkspaceDirectoryEntries> {
-  const requestedPath = directoryPath?.trim() || os.homedir();
+  const trimmedDirectoryPath = directoryPath?.trim();
+  if (
+    process.platform === "win32" &&
+    (trimmedDirectoryPath === undefined || trimmedDirectoryPath === "")
+  ) {
+    return getWindowsDriveEntries();
+  }
+
+  const requestedPath = trimmedDirectoryPath ?? os.homedir();
   const resolvedPath = path.resolve(requestedPath);
   const stat = await fs.stat(resolvedPath);
   if (!stat.isDirectory()) {
@@ -408,7 +447,11 @@ async function getWorkspaceDirectoryEntries({
 
   const rootPath = path.parse(resolvedPath).root;
   const parentPath =
-    resolvedPath === rootPath ? null : path.dirname(resolvedPath);
+    process.platform === "win32" && resolvedPath === rootPath
+      ? ""
+      : resolvedPath === rootPath
+        ? null
+        : path.dirname(resolvedPath);
 
   return {
     directoryPath: resolvedPath,

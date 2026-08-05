@@ -63,7 +63,7 @@ function WorkspaceRootDialog({
 
   function navigateTo(nextDirectoryPath: string): void {
     if (!allowMultiple) {
-      setUserSelectedPaths([nextDirectoryPath]);
+      setUserSelectedPaths(nextDirectoryPath ? [nextDirectoryPath] : []);
     }
     setDirectoryPath(nextDirectoryPath);
   }
@@ -300,9 +300,9 @@ function WorkspaceRootDialog({
                           "!px-0",
                           "shrink-0",
                         ].join(" ")}
-                        disabled={!parentPath || isBusy}
+                        disabled={parentPath === null || isBusy}
                         onClick={() => {
-                          if (parentPath) {
+                          if (parentPath !== null) {
                             navigateTo(parentPath);
                           }
                         }}
