@@ -686,39 +686,80 @@ class Menu {
   }
 }
 
+const MENU_ROLE_DEFAULTS: Record<
+  string,
+  { accelerator?: string; label: string }
+> = {
+  copy: { accelerator: "CmdOrCtrl+C", label: "Copy" },
+  cut: { accelerator: "CmdOrCtrl+X", label: "Cut" },
+  editMenu: { label: "Edit" },
+  help: { label: "Help" },
+  paste: { accelerator: "CmdOrCtrl+V", label: "Paste" },
+  quit: { accelerator: "Ctrl+Q", label: "Quit" },
+  redo: { accelerator: "Ctrl+Y", label: "Redo" },
+  selectAll: { accelerator: "CmdOrCtrl+A", label: "Select All" },
+  undo: { accelerator: "CmdOrCtrl+Z", label: "Undo" },
+};
+
+const EDIT_MENU_TEMPLATE: Array<Record<string, unknown>> = [
+  { role: "undo" },
+  { role: "redo" },
+  { type: "separator" },
+  { role: "cut" },
+  { role: "copy" },
+  { role: "paste" },
+  { role: "selectAll" },
+];
+
 class MenuItem {
-  checked?: boolean;
-  click?: (...args: unknown[]) => unknown;
-  enabled?: boolean;
+  private static nextCommandId = 1;
+
+  accelerator?: string;
+  checked = false;
+  click: (...args: unknown[]) => unknown = () => undefined;
+  readonly commandId: number;
+  enabled = true;
   id?: string;
   label?: string;
   role?: string;
   submenu?: Menu;
-  type?: string;
-  visible?: boolean;
+  type = "normal";
+  visible = true;
 
   constructor(...args: unknown[]) {
     log("new MenuItem", args);
     const [options] = args as [Record<string, unknown>?];
+    this.commandId = MenuItem.nextCommandId++;
     if (!options || typeof options !== "object") {
       return;
     }
+
+    const role = typeof options.role === "string" ? options.role : undefined;
+    const roleDefaults = role ? MENU_ROLE_DEFAULTS[role] : undefined;
+    this.accelerator =
+      typeof options.accelerator === "string"
+        ? options.accelerator
+        : roleDefaults?.accelerator;
     this.checked =
-      typeof options.checked === "boolean" ? options.checked : undefined;
+      typeof options.checked === "boolean" ? options.checked : false;
     this.click =
       typeof options.click === "function"
         ? (options.click as (...args: unknown[]) => unknown)
-        : undefined;
+        : () => undefined;
     this.enabled =
-      typeof options.enabled === "boolean" ? options.enabled : undefined;
+      typeof options.enabled === "boolean" ? options.enabled : true;
     this.id = typeof options.id === "string" ? options.id : undefined;
-    this.label = typeof options.label === "string" ? options.label : undefined;
-    this.role = typeof options.role === "string" ? options.role : undefined;
-    this.type = typeof options.type === "string" ? options.type : undefined;
+    this.label =
+      typeof options.label === "string"
+        ? options.label
+        : roleDefaults?.label;
+    this.role = role;
+    this.type = typeof options.type === "string" ? options.type : "normal";
     this.visible =
-      typeof options.visible === "boolean" ? options.visible : undefined;
+      typeof options.visible === "boolean" ? options.visible : true;
 
-    const submenu = options.submenu;
+    const submenu =
+      options.submenu ?? (role === "editMenu" ? EDIT_MENU_TEMPLATE : undefined);
     if (Array.isArray(submenu)) {
       this.submenu = Menu.buildFromTemplate(submenu);
       return;
