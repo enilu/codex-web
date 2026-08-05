@@ -108,7 +108,21 @@ someone with access to the web ui may be able to:
   - subagents
   - inline images
   - editor sidepanel
+  - isolated browser themes and custom backgrounds
   - transcription
+
+### themes
+
+use the palette tab on the right edge of the browser to open theme settings.
+codex-web includes several built-in themes plus an optional custom background.
+theme preferences and images are stored in the current browser, not in the
+workspace or codex configuration.
+
+themes are loaded as an optional module after the core codex bridge starts. if
+the theme module, browser storage, or a custom image fails, codex-web falls back
+to the native appearance without blocking the main interface. custom images are
+limited to PNG, JPEG, or WebP files up to 16 MB, 16384 pixels per dimension, and
+50 megapixels.
 
 ## roadmap
 

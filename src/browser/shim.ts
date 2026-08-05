@@ -737,6 +737,28 @@ export const ipcRenderer = {
 
 ensureSocket();
 
+function startOptionalThemeFeature(): void {
+  window.setTimeout(() => {
+    void import("./theme/index")
+      .then(({ startThemeFeature }) => startThemeFeature())
+      .catch((error) => {
+        console.warn(
+          "[codex-web-theme] optional theme module did not load; continuing with native appearance",
+          error,
+        );
+      });
+  }, 0);
+}
+
+try {
+  startOptionalThemeFeature();
+} catch (error) {
+  console.warn(
+    "[codex-web-theme] optional theme startup failed; continuing with native appearance",
+    error,
+  );
+}
+
 export const contextBridge = {
   exposeInMainWorld(_key: string, _api: unknown): void {
     Reflect.set(window, _key, _api);
