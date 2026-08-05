@@ -13,9 +13,7 @@ const DATABASE_NAME = "codex-web-theme-assets";
 const DATABASE_STORE = "assets";
 const BACKGROUND_KEY = "custom-background";
 const STYLE_ID = "codex-web-theme-style";
-const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
-const MAX_IMAGE_DIMENSION = 16_384;
-const MAX_IMAGE_PIXELS = 50_000_000;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 type ThemeListener = (settings: ThemeSettings) => void;
 
@@ -90,21 +88,11 @@ async function validateBackgroundImage(file: File): Promise<void> {
     throw new Error("仅支持 PNG、JPEG 和 WebP 图片");
   }
   if (file.size < 1 || file.size > MAX_IMAGE_BYTES) {
-    throw new Error("背景图片必须小于 16 MB");
+    throw new Error("背景图片不能超过 20 MB");
   }
 
   const bitmap = await createImageBitmap(file);
-  try {
-    if (
-      bitmap.width > MAX_IMAGE_DIMENSION ||
-      bitmap.height > MAX_IMAGE_DIMENSION ||
-      bitmap.width * bitmap.height > MAX_IMAGE_PIXELS
-    ) {
-      throw new Error("背景图片尺寸不能超过 16384px 或 5000 万像素");
-    }
-  } finally {
-    bitmap.close();
-  }
+  bitmap.close();
 }
 
 export class ThemeEngine {

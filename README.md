@@ -144,8 +144,7 @@ workspace or codex configuration.
 themes are loaded as an optional module after the core codex bridge starts. if
 the theme module, browser storage, or a custom image fails, codex-web falls back
 to the native appearance without blocking the main interface. custom images are
-limited to PNG, JPEG, or WebP files up to 16 MB, 16384 pixels per dimension, and
-50 megapixels.
+limited to PNG, JPEG, or WebP files up to 20 MB.
 
 ### browser header
 
