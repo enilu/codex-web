@@ -12,10 +12,14 @@ import {
   type WorkspaceDirectoryEntries,
 } from "./workspace-root-dialog";
 
-function installCryptoRandomUuidFallback() {
+function installCryptoRandomUuidFallback(): void {
   const cryptoObject = globalThis.crypto;
-  if (!cryptoObject || typeof cryptoObject.randomUUID === "function") {
+  if (typeof cryptoObject?.randomUUID === "function") {
     return;
+  }
+
+  if (!cryptoObject || typeof cryptoObject.getRandomValues !== "function") {
+    throw new Error("Web Crypto API is unavailable");
   }
 
   const randomUUID = ():
@@ -36,6 +40,7 @@ function installCryptoRandomUuidFallback() {
   Object.defineProperty(cryptoObject, "randomUUID", {
     configurable: true,
     value: randomUUID,
+    writable: true,
   });
 }
 
