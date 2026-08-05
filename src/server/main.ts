@@ -595,6 +595,18 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     return reply.sendFile("index.html");
   });
 
+  const loginPageHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
+    const html = await fs.readFile(
+      path.resolve(__dirname, "../../assets/login.html"),
+      "utf8",
+    );
+
+    return reply.type("text/html; charset=utf-8").send(html);
+  };
+
+  app.get("/login.html", loginPageHandler);
+  app.get("/codex/login.html", loginPageHandler);
+
   app.setNotFoundHandler((request, reply) => {
     if (request.url.startsWith("/@fs/")) {
       return reply.code(404).send({ error: "Not Found" });
