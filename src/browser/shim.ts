@@ -465,6 +465,18 @@ function isUnhandledAddWorkspaceRootOptionMessage(value: unknown): value is {
   );
 }
 
+function isUnhandledPickWorkspaceRootOptionMessage(value: unknown): value is {
+  allowMultiple?: boolean;
+  type: "electron-pick-workspace-root-option";
+} {
+  return (
+    isRecord(value) &&
+    value.type === "electron-pick-workspace-root-option" &&
+    (value.allowMultiple === undefined ||
+      typeof value.allowMultiple === "boolean")
+  );
+}
+
 function isOpenInBrowserMessage(value: unknown): value is {
   type: "open-in-browser";
   url: string;
@@ -495,6 +507,16 @@ function requestWorkspaceDirectoryEntries(
       directoriesOnly: true,
     });
   });
+}
+
+function dispatchWorkspaceRootOptionPicked(root: string): void {
+  window.postMessage(
+    {
+      type: "workspace-root-option-picked",
+      root,
+    },
+    window.location.origin,
+  );
 }
 
 const themeMediaQuery = matchMedia("(prefers-color-scheme: dark)");
@@ -595,10 +617,22 @@ export const ipcRenderer = {
         return handleLocalFilePickerMessage(args[0]);
       }
 
+      if (isUnhandledPickWorkspaceRootOptionMessage(args[0])) {
+        return openSelectWorkspaceRootDialog({
+          allowMultiple: args[0].allowMultiple,
+          listDirectory: requestWorkspaceDirectoryEntries,
+        }).then((roots) => {
+          for (const root of roots ?? []) {
+            dispatchWorkspaceRootOptionPicked(root);
+          }
+        });
+      }
+
       if (isUnhandledAddWorkspaceRootOptionMessage(args[0])) {
         return openSelectWorkspaceRootDialog({
           listDirectory: requestWorkspaceDirectoryEntries,
-        }).then((root) => {
+        }).then((roots) => {
+          const root = roots?.[0];
           if (!root) {
             return undefined;
           }
