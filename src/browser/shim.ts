@@ -46,6 +46,89 @@ function installCryptoRandomUuidFallback(): void {
 
 installCryptoRandomUuidFallback();
 
+function copyTextWithLegacyClipboard(text: string): boolean {
+  if (!document.body || typeof document.execCommand !== "function") {
+    return false;
+  }
+
+  const activeElement = document.activeElement;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  Object.assign(textarea.style, {
+    height: "1px",
+    left: "-9999px",
+    opacity: "0",
+    pointerEvents: "none",
+    position: "fixed",
+    top: "0",
+    width: "1px",
+  });
+  document.body.append(textarea);
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+    if (activeElement instanceof HTMLElement) {
+      activeElement.focus({ preventScroll: true });
+    }
+  }
+}
+
+function installClipboardFallback(): void {
+  const nativeClipboard = navigator.clipboard;
+  const nativeWriteText = nativeClipboard?.writeText?.bind(nativeClipboard);
+
+  const writeText = async (text: string): Promise<void> => {
+    if (!globalThis.isSecureContext && copyTextWithLegacyClipboard(text)) {
+      return;
+    }
+
+    if (nativeWriteText) {
+      try {
+        await nativeWriteText(text);
+        return;
+      } catch (error) {
+        if (copyTextWithLegacyClipboard(text)) {
+          return;
+        }
+        throw error;
+      }
+    }
+
+    if (!copyTextWithLegacyClipboard(text)) {
+      throw new Error("Clipboard API is unavailable");
+    }
+  };
+
+  const clipboardFallback: Partial<Clipboard> = { writeText };
+  if (nativeClipboard?.read) {
+    clipboardFallback.read = nativeClipboard.read.bind(nativeClipboard);
+  }
+  if (nativeClipboard?.readText) {
+    clipboardFallback.readText = nativeClipboard.readText.bind(nativeClipboard);
+  }
+  if (nativeClipboard?.write) {
+    clipboardFallback.write = nativeClipboard.write.bind(nativeClipboard);
+  }
+
+  try {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: clipboardFallback,
+    });
+  } catch (error) {
+    console.warn(
+      "[codex-web] failed to install clipboard fallback; native clipboard behavior remains active",
+      error,
+    );
+  }
+}
+
+installClipboardFallback();
+
 const BROWSER_SHELL_STYLE_ID = "codex-web-browser-shell-style";
 
 function startBrowserShellFeature(): void {
@@ -352,13 +435,22 @@ function ensureSocket(): void {
   }
 
   const backendPath = `${getBrowserBasePath()}/__backend/ipc`;
-  socket = new WebSocket(
+  const nextSocket = new WebSocket(
     `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${backendPath}`,
   );
-  socket.addEventListener("open", () => {
+  socket = nextSocket;
+
+  nextSocket.addEventListener("open", () => {
+    if (socket !== nextSocket) {
+      nextSocket.close();
+      return;
+    }
     flushOutboundQueue();
   });
-  socket.addEventListener("message", (event) => {
+  nextSocket.addEventListener("message", (event) => {
+    if (socket !== nextSocket) {
+      return;
+    }
     try {
       const message = JSON.parse(String(event.data)) as MainToRendererMessage;
       handleIncomingMessage(message);
@@ -369,15 +461,25 @@ function ensureSocket(): void {
       );
     }
   });
-  socket.addEventListener("close", () => {
+  nextSocket.addEventListener("close", () => {
+    if (socket !== nextSocket) {
+      return;
+    }
+    socket = null;
     for (const port of messagePorts.values()) {
       port.close();
     }
     messagePorts.clear();
     scheduleReconnect();
   });
-  socket.addEventListener("error", () => {
-    scheduleReconnect();
+  nextSocket.addEventListener("error", () => {
+    if (
+      socket === nextSocket &&
+      nextSocket.readyState !== WebSocket.CLOSING &&
+      nextSocket.readyState !== WebSocket.CLOSED
+    ) {
+      nextSocket.close();
+    }
   });
 }
 
